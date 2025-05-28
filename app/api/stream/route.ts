@@ -1,6 +1,7 @@
 // In-memory storage for rooms and streams (replace with a database in production)
 const rooms = new Map<string, Set<string>>() // roomId -> Set<userId>
 const streams = new Map<string, { userId: string; streamId: string; roomId: string; timestamp: number }>() // "roomId:userId" -> stream info
+const userPositions = new Map<string, { x: number; y: number; width: number; height: number; rotation: number }>() // "roomId:userId" -> position
 
 export async function POST(request: Request) {
   try {
@@ -57,6 +58,38 @@ export async function POST(request: Request) {
           streams: roomStreams,
         })
 
+      case "update-position":
+        // Update user's camera position
+        const positionKey = `${roomId}:${userId}`
+        userPositions.set(positionKey, data.position)
+
+        console.log(`📍 Position updated for ${userId} in room ${roomId}:`, data.position)
+
+        return Response.json({
+          success: true,
+          position: data.position,
+        })
+
+      case "get-positions":
+        // Get all user positions in the room
+        const roomPositions = Array.from(userPositions.entries())
+          .filter(([key]) => key.startsWith(`${roomId}:`))
+          .reduce(
+            (acc, [key, position]) => {
+              const userId = key.split(":")[1]
+              acc[userId] = position
+              return acc
+            },
+            {} as Record<string, any>,
+          )
+
+        console.log(`📍 Positions in room ${roomId}:`, roomPositions)
+
+        return Response.json({
+          success: true,
+          positions: roomPositions,
+        })
+
       case "leave":
         // Remove user from room and clean up streams
         if (rooms.has(roomId)) {
@@ -66,9 +99,11 @@ export async function POST(request: Request) {
           }
         }
 
-        // Remove user's streams
+        // Remove user's streams and positions
         const userStreamKey = `${roomId}:${userId}`
+        const userPositionKey = `${roomId}:${userId}`
         streams.delete(userStreamKey)
+        userPositions.delete(userPositionKey)
 
         console.log(`👋 User ${userId} left room ${roomId}`)
 

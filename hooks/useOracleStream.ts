@@ -6,6 +6,7 @@ interface UseOracleStreamProps {
   roomId: string
   onRemoteStream: (streamUrl: string, userId: string) => void
   onConnectionStateChange: (state: string) => void
+  onPositionUpdate: (userId: string, position: any) => void
 }
 
 interface StreamInfo {
@@ -14,7 +15,12 @@ interface StreamInfo {
   streamUrl: string
 }
 
-export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChange }: UseOracleStreamProps) {
+export function useOracleStream({
+  roomId,
+  onRemoteStream,
+  onConnectionStateChange,
+  onPositionUpdate,
+}: UseOracleStreamProps) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -23,6 +29,7 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
 
   const userId = useRef<string>(`user_${Math.random().toString(36).substr(2, 9)}`)
   const pollingInterval = useRef<NodeJS.Timeout | null>(null)
+  const positionPollingInterval = useRef<NodeJS.Timeout | null>(null)
   const hasJoinedRoom = useRef<boolean>(false)
   const streamServerUrl = useRef<string>("")
   const localStreamId = useRef<string>("")
@@ -53,6 +60,34 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
       throw error
     }
   }
+
+  const updatePosition = async (position: any) => {
+    if (!hasJoinedRoom.current) return
+
+    try {
+      await sendStreamMessage("update-position", { position })
+    } catch (error) {
+      console.error("Failed to update position:", error)
+    }
+  }
+
+  const pollForPositions = useCallback(async () => {
+    if (!hasJoinedRoom.current) return
+
+    try {
+      const response = await sendStreamMessage("get-positions")
+      const { positions } = response
+
+      // Notify about position updates for other users
+      Object.entries(positions).forEach(([userId, position]) => {
+        if (userId !== userId.current) {
+          onPositionUpdate(userId, position)
+        }
+      })
+    } catch (error) {
+      console.error("Failed to poll positions:", error)
+    }
+  }, [onPositionUpdate])
 
   const startLocalVideo = async () => {
     try {
@@ -91,13 +126,6 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
       // Generate unique stream ID
       localStreamId.current = `stream_${userId.current}_${Date.now()}`
 
-      // In a real implementation, you would:
-      // 1. Create WebSocket connection to Oracle VM
-      // 2. Send video frames via WebSocket or WebRTC to Oracle server
-      // 3. Oracle server processes frames with filters
-      // 4. Oracle server streams processed video back
-
-      // For now, we'll simulate this
       await sendStreamMessage("start-stream", {
         streamId: localStreamId.current,
       })
@@ -198,9 +226,16 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
         clearInterval(pollingInterval.current)
       }
 
+      // Start polling for positions
+      if (positionPollingInterval.current) {
+        clearInterval(positionPollingInterval.current)
+      }
+
       // Poll immediately and then every 2 seconds
       await pollForStreams()
+      await pollForPositions()
       pollingInterval.current = setInterval(pollForStreams, 2000)
+      positionPollingInterval.current = setInterval(pollForPositions, 1000) // Poll positions more frequently
 
       console.log(`✅ [${userId.current}] Successfully joined room and started streaming`)
       setIsConnecting(false)
@@ -228,6 +263,11 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
     if (pollingInterval.current) {
       clearInterval(pollingInterval.current)
       pollingInterval.current = null
+    }
+
+    if (positionPollingInterval.current) {
+      clearInterval(positionPollingInterval.current)
+      positionPollingInterval.current = null
     }
 
     if (localStream) {
@@ -277,6 +317,7 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
     joinRoom,
     leaveRoom,
     retryConnection,
+    updatePosition,
     streamServerUrl: streamServerUrl.current,
     localStreamId: localStreamId.current,
     userId: userId.current,

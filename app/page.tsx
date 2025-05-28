@@ -28,6 +28,7 @@ import {
 import { useOracleStream } from "../hooks/useOracleStream"
 import { OracleStreamMonitor } from "../components/oracle-stream-monitor"
 import { FilterControls } from "../components/filter-controls"
+import { OracleDiagnostics } from "../components/oracle-diagnostics"
 
 interface PhotoPosition {
   x: number
@@ -60,12 +61,12 @@ export default function PhotoboothApp() {
     height: 150,
     rotation: 0,
   })
+  const [partnerPositions, setPartnerPositions] = useState<Map<string, PhotoPosition>>(new Map())
   const [isDragging, setIsDragging] = useState<string | null>(null)
   const [isResizing, setIsResizing] = useState<string | null>(null)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null)
   const [filters, setFilters] = useState<any>({})
-  const [partnerVideos, setPartnerVideos] = useState<Map<string, HTMLVideoElement>>(new Map())
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
@@ -83,6 +84,7 @@ export default function PhotoboothApp() {
     joinRoom,
     leaveRoom,
     retryConnection,
+    updatePosition,
     streamServerUrl,
     localStreamId,
     userId: myUserId,
@@ -97,6 +99,14 @@ export default function PhotoboothApp() {
       })
     },
     onConnectionStateChange: setConnectionState,
+    onPositionUpdate: (userId: string, position: PhotoPosition) => {
+      console.log(`📍 Position update for ${userId}:`, position)
+      setPartnerPositions((prev) => {
+        const newMap = new Map(prev)
+        newMap.set(userId, position)
+        return newMap
+      })
+    },
   })
 
   const predefinedFrames = [
@@ -143,6 +153,13 @@ export default function PhotoboothApp() {
     }
   }, [remoteStreams])
 
+  // Update position when user moves their camera
+  useEffect(() => {
+    if (updatePosition) {
+      updatePosition(user1Position)
+    }
+  }, [user1Position, updatePosition])
+
   const generateRoomId = () => {
     const newRoomId = Math.random().toString(36).substr(2, 8).toUpperCase()
     setRoomId(newRoomId)
@@ -181,6 +198,7 @@ export default function PhotoboothApp() {
     setIsInRoom(false)
     setRoomId("")
     setRemoteStreamUrls(new Map())
+    setPartnerPositions(new Map())
   }
 
   const copyRoomLink = () => {
@@ -379,19 +397,22 @@ export default function PhotoboothApp() {
       ctx.restore()
     }
 
-    // Draw partner video (if available)
+    // Draw partner video (using their position if available)
     if (partnerVideoRef.current && partnerVideoRef.current.srcObject) {
       ctx.save()
 
+      // Use partner's actual position if available, otherwise use default
+      const partnerPosition = Array.from(partnerPositions.values())[0] || user2Position
+
       // Scale positions according to canvas size
-      const scaledX = user2Position.x * scaleX
-      const scaledY = user2Position.y * scaleY
-      const scaledWidth = user2Position.width * scaleX
-      const scaledHeight = user2Position.height * scaleY
+      const scaledX = partnerPosition.x * scaleX
+      const scaledY = partnerPosition.y * scaleY
+      const scaledWidth = partnerPosition.width * scaleX
+      const scaledHeight = partnerPosition.height * scaleY
 
       // Apply rotation around center
       ctx.translate(scaledX + scaledWidth / 2, scaledY + scaledHeight / 2)
-      ctx.rotate((user2Position.rotation * Math.PI) / 180)
+      ctx.rotate((partnerPosition.rotation * Math.PI) / 180)
 
       // Draw video maintaining aspect ratio
       ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
@@ -450,6 +471,9 @@ export default function PhotoboothApp() {
       </div>
     )
   }
+
+  // Get partner position for display
+  const displayPartnerPosition = Array.from(partnerPositions.values())[0] || user2Position
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-pink-100 p-4">
@@ -673,16 +697,16 @@ export default function PhotoboothApp() {
                     </div>
                   )}
 
-                  {/* Partner video (fixed position, not draggable) */}
+                  {/* Partner video (shows their position, not draggable by you) */}
                   {remoteStreams.length > 0 && (
                     <div
                       className="absolute border-2 border-green-500 z-20 bg-black"
                       style={{
-                        left: user2Position.x,
-                        top: user2Position.y,
-                        width: user2Position.width,
-                        height: user2Position.height,
-                        transform: `rotate(${user2Position.rotation}deg)`,
+                        left: displayPartnerPosition.x,
+                        top: displayPartnerPosition.y,
+                        width: displayPartnerPosition.width,
+                        height: displayPartnerPosition.height,
+                        transform: `rotate(${displayPartnerPosition.rotation}deg)`,
                       }}
                     >
                       <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
@@ -690,6 +714,11 @@ export default function PhotoboothApp() {
                       <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded-br">
                         Partner
                       </div>
+                      {partnerPositions.size > 0 && (
+                        <div className="absolute top-0 right-0 w-4 h-4 bg-green-600 flex items-center justify-center">
+                          <Move className="h-3 w-3 text-white" />
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -759,6 +788,9 @@ export default function PhotoboothApp() {
         {isInRoom && (
           <div className="mt-6 space-y-6">
             <OracleStreamMonitor />
+            <div className="mt-6">
+              <OracleDiagnostics />
+            </div>
           </div>
         )}
 
