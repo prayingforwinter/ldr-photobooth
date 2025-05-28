@@ -152,11 +152,26 @@ export function useOracleStream({
 
       // Update remote streams
       const newStreams = otherStreams.map((stream: any) => {
-        // Create a fake stream URL for testing
-        // In production, this would be a real URL from your Oracle server
-        const streamUrl = stream.streamId
-          ? `${process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "http://localhost:8080"}/stream/${stream.streamId}`
-          : null
+        // Create a secure stream URL (HTTPS/WSS) for the Oracle server
+        let streamUrl: string | null = null
+
+        if (stream.streamId) {
+          const baseUrl = process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || ""
+
+          // Ensure we use HTTPS/WSS
+          if (baseUrl.startsWith("http://")) {
+            streamUrl = `${baseUrl.replace("http://", "https://")}/stream/${stream.streamId}`
+          } else if (baseUrl.startsWith("https://")) {
+            streamUrl = `${baseUrl}/stream/${stream.streamId}`
+          } else if (baseUrl.startsWith("ws://")) {
+            streamUrl = `${baseUrl.replace("ws://", "wss://")}/stream/${stream.streamId}`
+          } else if (baseUrl.startsWith("wss://")) {
+            streamUrl = `${baseUrl}/stream/${stream.streamId}`
+          } else {
+            // No protocol, assume HTTPS
+            streamUrl = `https://${baseUrl}/stream/${stream.streamId}`
+          }
+        }
 
         return {
           userId: stream.userId,
@@ -215,7 +230,18 @@ export function useOracleStream({
       console.log(`👥 [${userId.current}] Other participants:`, participants)
 
       // Use the server URL from the response or fall back to environment variable
-      streamServerUrl.current = serverUrl || process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "http://localhost:8080"
+      // Always ensure we use HTTPS/WSS
+      let secureServerUrl = serverUrl || process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || ""
+
+      if (secureServerUrl.startsWith("http://")) {
+        secureServerUrl = secureServerUrl.replace("http://", "https://")
+      } else if (secureServerUrl.startsWith("ws://")) {
+        secureServerUrl = secureServerUrl.replace("ws://", "wss://")
+      } else if (!secureServerUrl.startsWith("https://") && !secureServerUrl.startsWith("wss://")) {
+        secureServerUrl = `https://${secureServerUrl}`
+      }
+
+      streamServerUrl.current = secureServerUrl
       hasJoinedRoom.current = true
 
       // Start streaming to Oracle server

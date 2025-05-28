@@ -8,63 +8,119 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Oracle stream server URL not configured" }, { status: 500 })
     }
 
-    // Parse the server URL to handle different formats
-    let statsUrl: string
-    if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
-      statsUrl = `${serverUrl}/stats`
-    } else if (serverUrl.startsWith("ws://")) {
-      statsUrl = `${serverUrl.replace("ws://", "http://")}/stats`
-    } else if (serverUrl.startsWith("wss://")) {
-      statsUrl = `${serverUrl.replace("wss://", "https://")}/stats`
+    // Extract base URL without protocol
+    let baseUrl: string
+    if (serverUrl.includes("://")) {
+      baseUrl = serverUrl.split("://")[1]
     } else {
-      statsUrl = `http://${serverUrl}/stats`
+      baseUrl = serverUrl
     }
 
-    console.log(`📊 Fetching Oracle server stats from: ${statsUrl}`)
+    // Try both HTTP and HTTPS protocols for stats endpoint
+    const urlsToTry = [
+      { url: `http://${baseUrl}/stats`, protocol: "HTTP" },
+      { url: `https://${baseUrl}/stats`, protocol: "HTTPS" },
+    ]
 
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
+    console.log(`📊 Testing Oracle server stats endpoints...`)
 
-    try {
-      const response = await fetch(statsUrl, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "Vercel-Photobooth-App/1.0",
-        },
-        signal: controller.signal,
-      })
+    let lastError = ""
 
-      clearTimeout(timeoutId)
-
-      // Get the raw response text first
-      const responseText = await response.text()
-      console.log(`📄 Raw stats response: ${responseText.substring(0, 200)}${responseText.length > 200 ? "..." : ""}`)
-
-      let data
+    for (const { url, protocol } of urlsToTry) {
       try {
-        // Try to parse as JSON
-        data = JSON.parse(responseText)
-      } catch (parseError) {
-        console.error(`❌ Failed to parse stats response as JSON: ${parseError}`)
-        throw new Error(`Server responded with non-JSON data: ${responseText.substring(0, 100)}...`)
+        console.log(`📊 Trying stats via ${protocol}: ${url}`)
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 5000) // Shorter timeout for stats
+
+        const response = await fetch(url, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            "User-Agent": "Vercel-Photobooth-App/1.0",
+            Accept: "application/json, text/plain, */*",
+          },
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (response.ok) {
+          const responseText = await response.text()
+          console.log(`📊 Stats response from ${url}: ${responseText.substring(0, 100)}`)
+
+          let data
+          try {
+            data = JSON.parse(responseText)
+          } catch (parseError) {
+            console.warn(`📊 Stats response not JSON from ${url}, treating as text`)
+            data = {
+              status: "available",
+              note: "Stats endpoint responded but with non-JSON data",
+              rawResponse: responseText.substring(0, 200),
+              protocol,
+            }
+          }
+
+          console.log(`✅ Stats retrieved successfully via ${protocol}`)
+
+          return NextResponse.json({
+            success: true,
+            data: {
+              ...data,
+              protocol,
+              testedUrl: url,
+              retrievedAt: new Date().toISOString(),
+            },
+            timestamp: new Date().toISOString(),
+          })
+        } else {
+          const errorMsg = `HTTP ${response.status}: ${response.statusText}`
+          lastError = `${url}: ${errorMsg}`
+          console.log(`❌ Stats failed via ${protocol}: ${errorMsg}`)
+
+          // If it's a 404, the stats endpoint might not exist
+          if (response.status === 404) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: "Stats endpoint not available",
+                note: "The /stats endpoint is not implemented on this server",
+                statusCode: 404,
+                timestamp: new Date().toISOString(),
+              },
+              { status: 200 }, // Return 200 so client can handle gracefully
+            )
+          }
+        }
+      } catch (fetchError) {
+        const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown fetch error"
+        lastError = `${url}: ${errorMsg}`
+        console.log(`❌ Stats fetch failed via ${protocol}: ${errorMsg}`)
+
+        // Continue to next URL
+        continue
       }
-
-      if (!response.ok) {
-        throw new Error(`Server responded with status: ${response.status}`)
-      }
-
-      console.log(`📊 Oracle server stats:`, data)
-
-      return NextResponse.json({
-        success: true,
-        data,
-        timestamp: new Date().toISOString(),
-      })
-    } catch (fetchError) {
-      clearTimeout(timeoutId)
-      throw fetchError
     }
+
+    // If we get here, all URLs failed
+    console.warn(`📊 All stats endpoints failed. Last error: ${lastError}`)
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Stats endpoint not accessible",
+        details: lastError,
+        note: "Server may not have a /stats endpoint or it may be unreachable",
+        troubleshooting: [
+          "Stats endpoint is optional - server health can still be monitored",
+          "Check if your Oracle stream server implements /stats endpoint",
+          "Verify server is running: sudo systemctl status oracle-stream-server",
+        ],
+        timestamp: new Date().toISOString(),
+      },
+      { status: 200 }, // Return 200 so client can handle gracefully
+    )
   } catch (error) {
     console.error("Oracle stats fetch failed:", error)
 
@@ -74,9 +130,10 @@ export async function GET(request: NextRequest) {
       {
         success: false,
         error: errorMessage,
+        note: "Stats collection failed - this is not critical for basic functionality",
         timestamp: new Date().toISOString(),
       },
-      { status: 200 },
+      { status: 200 }, // Return 200 so client can handle gracefully
     )
   }
 }

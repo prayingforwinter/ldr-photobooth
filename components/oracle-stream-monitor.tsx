@@ -4,23 +4,29 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Server, Activity, AlertCircle, CheckCircle, RefreshCw, Wifi, WifiOff } from "lucide-react"
+import { Server, Activity, AlertCircle, CheckCircle, RefreshCw, Wifi, Network, Info, BarChart3 } from "lucide-react"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 export function OracleStreamMonitor() {
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking")
   const [serverStats, setServerStats] = useState<any>(null)
+  const [statsError, setStatsError] = useState<string | null>(null)
   const [lastCheck, setLastCheck] = useState<Date | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [healthData, setHealthData] = useState<any>(null)
+  const [diagnostics, setDiagnostics] = useState<any>(null)
+  const [isTestingNetwork, setIsTestingNetwork] = useState(false)
+  const [networkTestResults, setNetworkTestResults] = useState<any>(null)
 
   const checkServerStatus = async () => {
     setServerStatus("checking")
     setError(null)
+    setDiagnostics(null)
+    setStatsError(null)
 
     try {
-      console.log(`🔍 Checking Oracle server via proxy...`)
+      console.log(`🔍 Checking Oracle server via enhanced proxy...`)
 
-      // Use our proxy API route to avoid CORS issues
       const healthResponse = await fetch("/api/oracle-health", {
         method: "GET",
         headers: {
@@ -28,40 +34,21 @@ export function OracleStreamMonitor() {
         },
       })
 
-      if (!healthResponse.ok) {
-        throw new Error(`Proxy API error: ${healthResponse.status}`)
-      }
-
       const healthResult = await healthResponse.json()
 
-      if (healthResult.success) {
+      if (healthResponse.ok && healthResult.success) {
         console.log(`✅ Oracle server is online:`, healthResult.data)
         setServerStatus("online")
         setHealthData(healthResult.data)
+        setDiagnostics(healthResult.diagnostics)
 
-        // Try to get server stats
-        try {
-          const statsResponse = await fetch("/api/oracle-stats", {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          })
-
-          if (statsResponse.ok) {
-            const statsResult = await statsResponse.json()
-            if (statsResult.success) {
-              setServerStats(statsResult.data)
-              console.log(`📊 Oracle server stats:`, statsResult.data)
-            }
-          }
-        } catch (statsError) {
-          console.warn("Could not fetch server stats:", statsError)
-        }
+        // Try to get server stats (non-blocking)
+        fetchServerStats()
       } else {
         console.error(`❌ Oracle server is offline:`, healthResult.error)
         setServerStatus("offline")
-        setError(healthResult.error)
+        setError(healthResult.error || "Unknown error")
+        setDiagnostics(healthResult.diagnostics)
       }
     } catch (error) {
       console.error("Oracle server check failed:", error)
@@ -69,9 +56,7 @@ export function OracleStreamMonitor() {
 
       if (error instanceof Error) {
         if (error.message.includes("Failed to fetch")) {
-          setError("Network error - check your internet connection")
-        } else if (error.message.includes("Proxy API error")) {
-          setError("Internal API error - check Vercel function logs")
+          setError("Network error - unable to reach health check API")
         } else {
           setError(error.message)
         }
@@ -81,6 +66,71 @@ export function OracleStreamMonitor() {
     }
 
     setLastCheck(new Date())
+  }
+
+  const fetchServerStats = async () => {
+    try {
+      console.log(`📊 Fetching Oracle server stats...`)
+
+      const statsResponse = await fetch("/api/oracle-stats", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      const statsResult = await statsResponse.json()
+
+      if (statsResponse.ok && statsResult.success) {
+        setServerStats(statsResult.data)
+        setStatsError(null)
+        console.log(`📊 Oracle server stats retrieved:`, statsResult.data)
+      } else {
+        // Stats failed but don't treat as critical error
+        setStatsError(statsResult.error || "Stats not available")
+        setServerStats(null)
+        console.warn(`📊 Stats not available:`, statsResult.error)
+
+        // If it's a 404, that's expected for some servers
+        if (statsResult.note && statsResult.note.includes("not implemented")) {
+          setStatsError("Stats endpoint not implemented (optional)")
+        }
+      }
+    } catch (error) {
+      console.warn("Could not fetch server stats:", error)
+      setStatsError("Stats collection failed (non-critical)")
+      setServerStats(null)
+    }
+  }
+
+  const runNetworkTest = async () => {
+    setIsTestingNetwork(true)
+    setNetworkTestResults(null)
+
+    try {
+      const response = await fetch("/api/oracle-network-test")
+      if (response.ok) {
+        const results = await response.json()
+        setNetworkTestResults(results)
+        console.log("Network test results:", results)
+      } else {
+        console.error("Network test API failed:", response.status)
+        setNetworkTestResults({
+          success: false,
+          error: `API error: ${response.status}`,
+          note: "Network test API is not responding",
+        })
+      }
+    } catch (error) {
+      console.error("Network test failed:", error)
+      setNetworkTestResults({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+        note: "Failed to run network tests",
+      })
+    } finally {
+      setIsTestingNetwork(false)
+    }
   }
 
   useEffect(() => {
@@ -93,45 +143,10 @@ export function OracleStreamMonitor() {
   }, [])
 
   const getServerUrl = () => {
-    const envUrl = process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL
-    if (!envUrl) return null
-
-    if (envUrl.startsWith("http://") || envUrl.startsWith("https://")) {
-      return envUrl
-    } else if (envUrl.startsWith("ws://")) {
-      return envUrl.replace("ws://", "http://")
-    } else if (envUrl.startsWith("wss://")) {
-      return envUrl.replace("wss://", "https://")
-    } else {
-      return `http://${envUrl}`
-    }
+    return process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || null
   }
 
   const serverUrl = getServerUrl()
-
-  // Function to test direct connection (for debugging)
-  const testDirectConnection = async () => {
-    setError("Testing direct connection... (check console)")
-
-    try {
-      const url = getServerUrl()
-      if (!url) {
-        setError("No server URL configured")
-        return
-      }
-
-      console.log(`🔍 Testing direct connection to: ${url}/health`)
-      const response = await fetch(`${url}/health`, {
-        mode: "no-cors", // This will make the request but won't let us read the response
-      })
-
-      console.log("Direct connection response:", response)
-      setError("Direct connection test completed - check console")
-    } catch (error) {
-      console.error("Direct connection test failed:", error)
-      setError(`Direct test failed: ${error instanceof Error ? error.message : "Unknown error"}`)
-    }
-  }
 
   return (
     <Card>
@@ -154,30 +169,28 @@ export function OracleStreamMonitor() {
               <RefreshCw className={`h-3 w-3 ${serverStatus === "checking" ? "animate-spin" : ""}`} />
             </Button>
             <Button
-              onClick={testDirectConnection}
+              onClick={runNetworkTest}
               size="sm"
               variant="outline"
-              title="Test direct connection (debug)"
-              className="ml-1"
+              disabled={isTestingNetwork}
+              title="Run simplified network test"
             >
-              <WifiOff className="h-3 w-3" />
+              {isTestingNetwork ? <Activity className="h-3 w-3 animate-pulse" /> : <Network className="h-3 w-3" />}
             </Button>
           </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+          <Info className="h-3 w-3 inline mr-1" />
+          <strong>Serverless Environment:</strong> Running simplified diagnostics due to Vercel limitations.
+        </div>
+
         <div className="grid grid-cols-1 gap-4">
           <div className="space-y-1">
             <p className="text-sm font-medium">Environment Variable</p>
             <p className="text-xs text-gray-600 break-all font-mono bg-gray-100 p-2 rounded">
-              NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL={process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "Not set"}
-            </p>
-          </div>
-
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Resolved Server URL</p>
-            <p className="text-xs text-gray-600 break-all font-mono bg-gray-100 p-2 rounded">
-              {serverUrl || "Could not resolve URL"}
+              NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL={serverUrl || "Not set"}
             </p>
           </div>
 
@@ -185,7 +198,7 @@ export function OracleStreamMonitor() {
             <p className="text-sm font-medium">Connection Method</p>
             <p className="text-xs text-gray-600 bg-blue-100 p-2 rounded">
               <Wifi className="h-3 w-3 inline mr-1" />
-              Via Vercel Proxy API (CORS-free)
+              HTTP/HTTPS fetch with timeout handling
             </p>
           </div>
 
@@ -197,61 +210,246 @@ export function OracleStreamMonitor() {
 
         {healthData && (
           <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-green-700 text-sm font-medium">Server Health Data</p>
+            <p className="text-green-700 text-sm font-medium">✅ Server Online</p>
             <div className="text-green-600 text-xs mt-1 space-y-1">
               <p>
                 <strong>Status:</strong> {healthData.status}
               </p>
               <p>
-                <strong>Server:</strong> {healthData.server || "Oracle Stream Server"}
+                <strong>Protocol:</strong> {healthData.protocol || "Unknown"}
               </p>
               <p>
-                <strong>Version:</strong> {healthData.version || "Unknown"}
+                <strong>Method:</strong> {healthData.method || "HTTP Fetch"}
               </p>
-              {healthData.activeStreams !== undefined && (
+              {healthData.testedUrl && (
                 <p>
-                  <strong>Active Streams:</strong> {healthData.activeStreams}
+                  <strong>Working URL:</strong> <code className="bg-white px-1 rounded">{healthData.testedUrl}</code>
                 </p>
               )}
             </div>
           </div>
         )}
 
-        {serverStats && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-3 bg-blue-50 rounded-lg">
-                <p className="text-lg font-bold text-blue-600">{serverStats.activeStreams || 0}</p>
-                <p className="text-xs text-blue-600">Active Streams</p>
-              </div>
-
-              <div className="text-center p-3 bg-green-50 rounded-lg">
-                <p className="text-lg font-bold text-green-600">{serverStats.totalConnections || 0}</p>
-                <p className="text-xs text-green-600">Connections</p>
-              </div>
-
-              <div className="text-center p-3 bg-purple-50 rounded-lg">
-                <p className="text-lg font-bold text-purple-600">
-                  {serverStats.uptime ? Math.floor(serverStats.uptime / 60) : 0}m
-                </p>
-                <p className="text-xs text-purple-600">Uptime</p>
-              </div>
+        {/* Server Stats Section */}
+        {serverStatus === "online" && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span className="text-sm font-medium">Server Statistics</span>
+              {serverStats && (
+                <Badge variant="default" className="text-xs">
+                  Available
+                </Badge>
+              )}
+              {statsError && (
+                <Badge variant="secondary" className="text-xs">
+                  {statsError.includes("not implemented") ? "Optional" : "Unavailable"}
+                </Badge>
+              )}
             </div>
 
-            {serverStats.memory && (
-              <div className="p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm font-medium">Server Memory</p>
-                <p className="text-xs text-gray-600">
-                  Heap: {serverStats.memory.heapUsed} / RSS: {serverStats.memory.rss}
-                </p>
+            {serverStats && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  {serverStats.uptime && (
+                    <div>
+                      <span className="font-medium">Uptime:</span> {Math.floor(serverStats.uptime / 60)} minutes
+                    </div>
+                  )}
+                  {serverStats.activeStreams !== undefined && (
+                    <div>
+                      <span className="font-medium">Active Streams:</span> {serverStats.activeStreams}
+                    </div>
+                  )}
+                  {serverStats.totalConnections !== undefined && (
+                    <div>
+                      <span className="font-medium">Connections:</span> {serverStats.totalConnections}
+                    </div>
+                  )}
+                  {serverStats.memory && (
+                    <div>
+                      <span className="font-medium">Memory:</span> {serverStats.memory.heapUsed || "Unknown"}
+                    </div>
+                  )}
+                  {serverStats.protocol && (
+                    <div>
+                      <span className="font-medium">Stats Protocol:</span> {serverStats.protocol}
+                    </div>
+                  )}
+                  {serverStats.version && (
+                    <div>
+                      <span className="font-medium">Version:</span> {serverStats.version}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {statsError && (
+              <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                <Info className="h-3 w-3 inline mr-1" />
+                <strong>Stats:</strong> {statsError}
+                {statsError.includes("not implemented") && (
+                  <span className="block mt-1">
+                    This is normal - stats endpoint is optional for basic functionality.
+                  </span>
+                )}
               </div>
             )}
           </div>
         )}
 
+        {diagnostics && (
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="diagnostics">
+              <AccordionTrigger>Connection Diagnostics</AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3">
+                    <div className="p-2 border rounded">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Basic Connectivity</span>
+                        <Badge variant={diagnostics.tests.basicConnectivity.success ? "default" : "destructive"}>
+                          {diagnostics.tests.basicConnectivity.success ? "✅ Pass" : "❌ Fail"}
+                        </Badge>
+                      </div>
+                      {diagnostics.tests.basicConnectivity.error && (
+                        <p className="text-xs text-red-600 mt-1">{diagnostics.tests.basicConnectivity.error}</p>
+                      )}
+                      {diagnostics.tests.basicConnectivity.details && (
+                        <p className="text-xs text-gray-600 mt-1">{diagnostics.tests.basicConnectivity.details}</p>
+                      )}
+                    </div>
+
+                    <div className="p-2 border rounded">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">HTTP Test</span>
+                        <Badge variant={diagnostics.tests.httpFetch.success ? "default" : "destructive"}>
+                          {diagnostics.tests.httpFetch.success ? "✅ Pass" : "❌ Fail"}
+                        </Badge>
+                      </div>
+                      {diagnostics.tests.httpFetch.error && (
+                        <p className="text-xs text-red-600 mt-1">{diagnostics.tests.httpFetch.error}</p>
+                      )}
+                      {diagnostics.tests.httpFetch.details && (
+                        <p className="text-xs text-gray-600 mt-1">{diagnostics.tests.httpFetch.details}</p>
+                      )}
+                    </div>
+
+                    <div className="p-2 border rounded">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">HTTPS Test</span>
+                        <Badge variant={diagnostics.tests.httpsTest.success ? "default" : "destructive"}>
+                          {diagnostics.tests.httpsTest.success ? "✅ Pass" : "❌ Fail"}
+                        </Badge>
+                      </div>
+                      {diagnostics.tests.httpsTest.error && (
+                        <p className="text-xs text-red-600 mt-1">{diagnostics.tests.httpsTest.error}</p>
+                      )}
+                      {diagnostics.tests.httpsTest.details && (
+                        <p className="text-xs text-gray-600 mt-1">{diagnostics.tests.httpsTest.details}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {diagnostics.recommendations && diagnostics.recommendations.length > 0 && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-yellow-700 text-sm font-medium">Recommendations:</p>
+                      <ul className="text-yellow-600 text-xs mt-1 space-y-1 list-disc list-inside">
+                        {diagnostics.recommendations.map((rec: string, i: number) => (
+                          <li key={i}>{rec}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        )}
+
+        {networkTestResults && (
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="network">
+              <AccordionTrigger>Network Test Results</AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-3">
+                  {networkTestResults.note && (
+                    <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                      <Info className="h-3 w-3 inline mr-1" />
+                      {networkTestResults.note}
+                    </div>
+                  )}
+
+                  {networkTestResults.analysis && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <p className="text-blue-700 text-sm font-medium">Test Summary</p>
+                      <div className="text-blue-600 text-xs mt-1">
+                        <p>
+                          <strong>Success Rate:</strong> {networkTestResults.analysis.successRate || 0}% (
+                          {networkTestResults.analysis.successfulTests || 0}/
+                          {networkTestResults.analysis.totalTests || 0})
+                        </p>
+                        <p>
+                          <strong>Target:</strong> {networkTestResults.analysis.hostname}:
+                          {networkTestResults.analysis.port}
+                        </p>
+                        {networkTestResults.analysis.environment && (
+                          <p>
+                            <strong>Environment:</strong> {networkTestResults.analysis.environment}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {networkTestResults.tests && (
+                    <div className="space-y-2">
+                      {networkTestResults.tests.map((test: any, index: number) => (
+                        <div
+                          key={index}
+                          className={`p-2 rounded text-xs ${test.success ? "bg-green-50 border border-green-200" : "bg-red-50 border border-red-200"}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium">{test.name}</span>
+                            <Badge variant={test.success ? "default" : "destructive"} className="text-xs">
+                              {test.success ? "✅ Pass" : "❌ Fail"}
+                            </Badge>
+                          </div>
+                          <p className="text-gray-600 mt-1 font-mono text-xs">{test.command}</p>
+                          {test.error && <p className="text-red-600 mt-1">{test.error}</p>}
+                          {test.output && test.success && <p className="text-green-600 mt-1">{test.output}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {networkTestResults.recommendations && networkTestResults.recommendations.length > 0 && (
+                    <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                      <p className="text-yellow-700 text-sm font-medium">Network Recommendations:</p>
+                      <ul className="text-yellow-600 text-xs mt-1 space-y-1 list-disc list-inside">
+                        {networkTestResults.recommendations.map((rec: string, i: number) => (
+                          <li key={i}>{rec}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {networkTestResults.error && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-red-700 text-sm font-medium">Network Test Error</p>
+                      <p className="text-red-600 text-xs mt-1">{networkTestResults.error}</p>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        )}
+
         {error && (
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-700 text-sm font-medium">Connection Error</p>
+            <p className="text-red-700 text-sm font-medium">❌ Connection Failed</p>
             <p className="text-red-600 text-xs mt-1">{error}</p>
           </div>
         )}
@@ -259,48 +457,53 @@ export function OracleStreamMonitor() {
         {serverStatus === "offline" && (
           <div className="space-y-3">
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <p className="text-yellow-700 text-sm font-medium">Troubleshooting Steps:</p>
+              <p className="text-yellow-700 text-sm font-medium">🔧 Quick Troubleshooting:</p>
               <ol className="text-yellow-600 text-xs mt-2 space-y-1 list-decimal list-inside">
-                <li>Check if your Oracle Cloud VM is running</li>
+                <li>Check Oracle Cloud Console - ensure VM is running</li>
+                <li>Verify public IP: {serverUrl?.split("://")[1]?.split(":")[0] || "Unknown"}</li>
                 <li>
-                  SSH into your VM and run:{" "}
-                  <code className="bg-white px-1 rounded">sudo systemctl status oracle-stream-server</code>
+                  SSH into VM: <code className="bg-white px-1 rounded">ssh ubuntu@your-ip</code>
                 </li>
                 <li>
-                  Check server logs:{" "}
-                  <code className="bg-white px-1 rounded">sudo journalctl -u oracle-stream-server -f</code>
+                  Test locally: <code className="bg-white px-1 rounded">curl http://localhost:8080/health</code>
                 </li>
-                <li>
-                  Verify firewall: <code className="bg-white px-1 rounded">sudo ufw status</code>
-                </li>
-                <li>
-                  Test direct access from VM: <code className="bg-white px-1 rounded">curl localhost:8080/health</code>
-                </li>
-                <li>Check Oracle Cloud Security Lists (port 8080 should be open)</li>
+                <li>Click the network icon above for detailed tests</li>
               </ol>
             </div>
 
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-blue-700 text-sm">
-                <strong>Expected URL format:</strong> <code>http://your-oracle-ip:8080</code> or{" "}
-                <code>ws://your-oracle-ip:8080</code>
-              </p>
-              <p className="text-blue-600 text-xs mt-1">
-                The connection now goes through Vercel's proxy API to avoid CORS issues.
-              </p>
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-700 text-sm font-medium">🚨 Most Common Issues:</p>
+              <ul className="text-red-600 text-xs mt-2 space-y-1 list-disc list-inside">
+                <li>
+                  <strong>Oracle Security Lists:</strong> Port 8080 not open for 0.0.0.0/0
+                </li>
+                <li>
+                  <strong>Ubuntu Firewall:</strong> Port 8080 blocked by ufw
+                </li>
+                <li>
+                  <strong>Stream Server:</strong> Not running or crashed
+                </li>
+                <li>
+                  <strong>VM Status:</strong> Oracle VM stopped or suspended
+                </li>
+              </ul>
             </div>
 
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-gray-700 text-sm font-medium">Quick VM Commands:</p>
-              <div className="text-gray-600 text-xs mt-1 space-y-1 font-mono">
-                <p># Check if server is running</p>
-                <p>curl http://localhost:8080/health</p>
-                <p></p>
-                <p># Restart the server</p>
-                <p>sudo systemctl restart oracle-stream-server</p>
-                <p></p>
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-blue-700 text-sm font-medium">🔧 VM Commands to Run:</p>
+              <div className="text-blue-600 text-xs mt-1 space-y-1 font-mono">
                 <p># Check server status</p>
                 <p>sudo systemctl status oracle-stream-server</p>
+                <p></p>
+                <p># Check firewall</p>
+                <p>sudo ufw status</p>
+                <p>sudo ufw allow 8080</p>
+                <p></p>
+                <p># Restart server</p>
+                <p>sudo systemctl restart oracle-stream-server</p>
+                <p></p>
+                <p># Check logs</p>
+                <p>sudo journalctl -u oracle-stream-server -f</p>
               </div>
             </div>
           </div>
@@ -310,18 +513,13 @@ export function OracleStreamMonitor() {
           <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-red-700 text-sm font-medium">Configuration Missing</p>
             <p className="text-red-600 text-xs mt-1">
-              Please set the NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL environment variable in your Vercel project settings.
+              Please set the NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL environment variable.
             </p>
             <p className="text-red-600 text-xs mt-1">
-              Example: <code>168.138.103.248:8080</code> or <code>http://168.138.103.248:8080</code>
+              Example: <code>168.138.103.248:8080</code>
             </p>
           </div>
         )}
-
-        <div className="p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
-          <WifiOff className="h-3 w-3 inline mr-1" />
-          <strong>CORS Fix:</strong> Health checks now go through Vercel's backend to avoid browser CORS restrictions.
-        </div>
       </CardContent>
     </Card>
   )

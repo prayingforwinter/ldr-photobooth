@@ -12,12 +12,18 @@ export async function GET(request: NextRequest) {
     let parsedUrl: URL
     let hostname: string
     let port = "8080" // Default port
-    let protocol = "http:"
+    let protocol = "https:" // Default to HTTPS based on error message
 
     try {
       // Try to parse as full URL
       if (serverUrl.includes("://")) {
-        parsedUrl = new URL(serverUrl)
+        // Always use HTTPS
+        const secureUrl = serverUrl
+          .replace("http://", "https://")
+          .replace("ws://", "https://")
+          .replace("wss://", "https://")
+
+        parsedUrl = new URL(secureUrl)
         hostname = parsedUrl.hostname
         port = parsedUrl.port || (parsedUrl.protocol === "https:" ? "443" : "80")
         protocol = parsedUrl.protocol
@@ -26,8 +32,8 @@ export async function GET(request: NextRequest) {
         const parts = serverUrl.split(":")
         hostname = parts[0]
         port = parts.length > 1 ? parts[1] : "8080"
-        protocol = "http:"
-        parsedUrl = new URL(`http://${hostname}:${port}`)
+        protocol = "https:"
+        parsedUrl = new URL(`https://${hostname}:${port}`)
       }
     } catch (parseError) {
       console.error("URL parsing error:", parseError)
@@ -87,6 +93,12 @@ export async function GET(request: NextRequest) {
 
     if (diagnostics.analysis.isPortOpen && !diagnostics.analysis.isHealthy) {
       diagnostics.recommendations.push("Port is open but health check failed - check if stream server is running")
+    }
+
+    // Add HTTPS-specific recommendation if we see that error
+    const healthError = healthResult.status === "fulfilled" ? healthResult.value.error : ""
+    if (healthError && healthError.includes("only https is supported")) {
+      diagnostics.recommendations.push("Server requires HTTPS - ensure your Oracle VM has HTTPS configured properly")
     }
 
     return NextResponse.json({
