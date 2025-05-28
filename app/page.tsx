@@ -7,24 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  Camera,
-  Download,
-  Upload,
-  Users,
-  Server,
-  UserX,
-  Copy,
-  Share,
-  RefreshCw,
-  AlertTriangle,
-  Move,
-  Square,
-  RotateCcw,
-} from "lucide-react"
+import { Camera, Download, Users, Server, UserX, AlertTriangle, Move, Square } from "lucide-react"
 import { useOracleStream } from "../hooks/useOracleStream"
 import { OracleStreamMonitor } from "../components/oracle-stream-monitor"
 import { FilterControls } from "../components/filter-controls"
@@ -416,7 +400,8 @@ export default function PhotoboothApp() {
           <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Photobooth Studio</h1>
           <p className="text-gray-600">Room: {roomId}</p>
           <div className="text-sm text-gray-500 mt-2">
-            Connection: {connectionState} | Local: {localStream ? "✓" : "✗"} | Remote Streams: {remoteStreams.length}
+            Room: {roomId} | Status: {connectionState} | You: {localStream ? "✓" : "✗"} | Partners:{" "}
+            {remoteStreams.length}
           </div>
         </div>
 
@@ -430,8 +415,8 @@ export default function PhotoboothApp() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <span className="font-medium">You</span>
                   <Badge variant={localStream ? "default" : "secondary"}>
                     {localStream ? (
@@ -446,7 +431,7 @@ export default function PhotoboothApp() {
                   </Badge>
                 </div>
 
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <span className="font-medium">Oracle Server</span>
                   <Badge variant={isConnected ? "default" : "secondary"}>
                     {isConnected ? (
@@ -465,87 +450,31 @@ export default function PhotoboothApp() {
                   </Badge>
                 </div>
 
-                <div className="flex items-center justify-between p-2 bg-gray-50 rounded">
-                  <span className="font-medium">Remote Streams</span>
-                  <Badge variant="secondary">
-                    <Camera className="h-3 w-3 mr-1" />
-                    {remoteStreams.length}
-                  </Badge>
+                <div className="border-t pt-3">
+                  <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
+                    <span className="font-medium">Partner Connected</span>
+                    <Badge variant={remoteStreams.length > 0 ? "default" : "secondary"}>
+                      {remoteStreams.length > 0 ? (
+                        <>
+                          <Camera className="h-3 w-3 mr-1" />
+                          Yes ({remoteStreams.length})
+                        </>
+                      ) : (
+                        <>
+                          <UserX className="h-3 w-3 mr-1" />
+                          Waiting...
+                        </>
+                      )}
+                    </Badge>
+                  </div>
+
+                  {remoteStreams.length > 0 && (
+                    <div className="mt-2 text-xs text-gray-600 bg-green-50 p-2 rounded">
+                      ✅ Partner's camera is connected and streaming
+                    </div>
+                  )}
                 </div>
               </div>
-
-              <div className="flex gap-2">
-                <Button onClick={shareRoom} variant="outline" size="sm">
-                  <Share className="h-3 w-3 mr-1" />
-                  Share
-                </Button>
-                <Button onClick={copyRoomLink} variant="outline" size="sm">
-                  <Copy className="h-3 w-3 mr-1" />
-                  Copy Link
-                </Button>
-                <Button onClick={retryConnection} variant="outline" size="sm" disabled={isConnecting}>
-                  <RefreshCw className="h-3 w-3 mr-1" />
-                  Retry
-                </Button>
-                <Button onClick={handleLeaveRoom} variant="outline" size="sm">
-                  <UserX className="h-3 w-3 mr-1" />
-                  Leave
-                </Button>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Capture Quality</Label>
-                <Select value={captureResolution} onValueChange={setCaptureResolution}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="match">Match Preview (710x400)</SelectItem>
-                    <SelectItem value="hd">HD Landscape (1920x1080)</SelectItem>
-                    <SelectItem value="vertical">Vertical (1080x1920)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <Tabs defaultValue="frames" className="w-full">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="frames">Frames</TabsTrigger>
-                  <TabsTrigger value="upload">Upload</TabsTrigger>
-                </TabsList>
-                <TabsContent value="frames" className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    {predefinedFrames.map((frame, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setSelectedFrame(frame)}
-                        className={`p-2 border-2 rounded ${
-                          selectedFrame === frame ? "border-blue-500" : "border-gray-200"
-                        }`}
-                      >
-                        <img
-                          src={frame || "/placeholder.svg"}
-                          alt={`Frame ${index + 1}`}
-                          className="w-full h-16 object-cover rounded"
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </TabsContent>
-                <TabsContent value="upload" className="space-y-2">
-                  <Label htmlFor="frame-upload">Upload Custom Frame</Label>
-                  <Input
-                    id="frame-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleCustomFrameUpload}
-                    ref={fileInputRef}
-                  />
-                  <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full">
-                    <Upload className="h-4 w-4 mr-2" />
-                    Choose Frame
-                  </Button>
-                </TabsContent>
-              </Tabs>
             </CardContent>
           </Card>
 
@@ -573,117 +502,129 @@ export default function PhotoboothApp() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div
-                className="relative bg-gray-100 rounded-lg overflow-hidden mx-auto"
-                style={{ width: "710px", height: "400px" }}
-              >
-                <img
-                  src={selectedFrame || "/placeholder.svg"}
-                  alt="Frame"
-                  className="absolute inset-0 w-full h-full object-cover z-10 pointer-events-none"
-                />
+              <div className="flex justify-center">
+                <div
+                  className="relative bg-gray-100 rounded-lg overflow-hidden border-2 border-gray-300"
+                  style={{ width: "710px", height: "400px" }}
+                >
+                  {/* Frame overlay */}
+                  <img
+                    src={selectedFrame || "/placeholder.svg"}
+                    alt="Frame"
+                    className="absolute inset-0 w-full h-full object-cover z-10 pointer-events-none"
+                  />
 
-                {localStream && (
-                  <div
-                    className="absolute border-2 border-blue-500 cursor-move z-20"
-                    style={{
-                      left: user1Position.x,
-                      top: user1Position.y,
-                      width: user1Position.width,
-                      height: user1Position.height,
-                      transform: `rotate(${user1Position.rotation}deg)`,
-                    }}
-                    onMouseDown={(e) => handleMouseDown(e, "1", "drag")}
-                  >
-                    <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-
-                    <div className="absolute top-0 left-0 bg-blue-500 text-white text-xs px-1">You (Filtered)</div>
+                  {/* Local user video */}
+                  {localStream && (
                     <div
-                      className="absolute bottom-0 right-0 w-4 h-4 bg-blue-500 cursor-se-resize"
-                      onMouseDown={(e) => {
-                        e.stopPropagation()
-                        handleMouseDown(e, "1", "resize")
+                      className="absolute border-2 border-blue-500 cursor-move z-20 bg-black"
+                      style={{
+                        left: user1Position.x,
+                        top: user1Position.y,
+                        width: user1Position.width,
+                        height: user1Position.height,
+                        transform: `rotate(${user1Position.rotation}deg)`,
                       }}
+                      onMouseDown={(e) => handleMouseDown(e, "1", "drag")}
                     >
-                      <Square className="h-3 w-3 text-white" />
-                    </div>
-                    <div className="absolute top-0 right-0 w-4 h-4 bg-blue-600 cursor-move">
-                      <Move className="h-3 w-3 text-white" />
-                    </div>
-                  </div>
-                )}
+                      <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
 
-                {remoteStreams.map((stream, index) => (
-                  <div
-                    key={stream.userId}
-                    className="absolute border-2 border-green-500 z-20"
-                    style={{
-                      left: user2Position.x + index * 20,
-                      top: user2Position.y + index * 20,
-                      width: user2Position.width,
-                      height: user2Position.height,
-                      transform: `rotate(${user2Position.rotation}deg)`,
-                    }}
-                  >
-                    <video
-                      ref={(el) => {
-                        if (el) {
-                          remoteVideoRefs.current.set(stream.userId, el)
-                          // In a real implementation, you would set the src to the stream URL
-                          // el.src = stream.streamUrl
-                        }
+                      <div className="absolute top-0 left-0 bg-blue-500 text-white text-xs px-2 py-1 rounded-br">
+                        You
+                      </div>
+                      <div
+                        className="absolute bottom-0 right-0 w-4 h-4 bg-blue-500 cursor-se-resize flex items-center justify-center"
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          handleMouseDown(e, "1", "resize")
+                        }}
+                      >
+                        <Square className="h-3 w-3 text-white" />
+                      </div>
+                      <div className="absolute top-0 right-0 w-4 h-4 bg-blue-600 cursor-move flex items-center justify-center">
+                        <Move className="h-3 w-3 text-white" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Remote user videos */}
+                  {remoteStreams.map((stream, index) => (
+                    <div
+                      key={stream.userId}
+                      className="absolute border-2 border-green-500 cursor-move z-20 bg-black"
+                      style={{
+                        left: user2Position.x + index * 20,
+                        top: user2Position.y + index * 20,
+                        width: user2Position.width,
+                        height: user2Position.height,
+                        transform: `rotate(${user2Position.rotation}deg)`,
                       }}
-                      autoPlay
-                      playsInline
-                      className="w-full h-full object-cover"
-                    />
+                      onMouseDown={(e) => handleMouseDown(e, "2", "drag")}
+                    >
+                      <video
+                        ref={(el) => {
+                          if (el) {
+                            remoteVideoRefs.current.set(stream.userId, el)
+                            // Set the stream URL for the video element
+                            if (stream.streamUrl && el.src !== stream.streamUrl) {
+                              el.src = stream.streamUrl
+                              el.load()
+                            }
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          console.error("Video error for stream:", stream.streamUrl, e)
+                        }}
+                        onLoadStart={() => {
+                          console.log("Loading stream:", stream.streamUrl)
+                        }}
+                        onCanPlay={() => {
+                          console.log("Stream ready:", stream.streamUrl)
+                        }}
+                      />
 
-                    <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-1">
-                      Partner {index + 1} (Filtered)
-                    </div>
-                  </div>
-                ))}
-
-                {!localStream && (
-                  <div className="absolute inset-0 flex items-center justify-center z-30">
-                    <div className="text-center p-6 bg-white/90 rounded-lg">
-                      <Camera className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2">Camera Access Required</h3>
-                      <p className="text-gray-600">Please allow camera access to start the session</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {localStream && (
-                <div className="mt-4 grid grid-cols-1 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-sm font-medium text-blue-600">Your Position Controls</Label>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setUser1Position((prev) => ({ ...prev, rotation: prev.rotation - 15 }))}
+                      <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded-br">
+                        Partner {index + 1}
+                      </div>
+                      <div
+                        className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 cursor-se-resize flex items-center justify-center"
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          handleMouseDown(e, "2", "resize")
+                        }}
                       >
-                        <RotateCcw className="h-3 w-3" />
-                        Rotate
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setUser1Position((prev) => ({ ...prev, x: 50, y: 100, width: 200, height: 150, rotation: 0 }))
-                        }
-                      >
-                        Reset Position
-                      </Button>
+                        <Square className="h-3 w-3 text-white" />
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-500">
-                      Drag to move • Drag corner to resize • Your partner controls their own position
+                  ))}
+
+                  {/* No camera message */}
+                  {!localStream && (
+                    <div className="absolute inset-0 flex items-center justify-center z-30">
+                      <div className="text-center p-6 bg-white/90 rounded-lg shadow-lg">
+                        <Camera className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <h3 className="text-lg font-semibold mb-2">Camera Access Required</h3>
+                        <p className="text-gray-600">Please allow camera access to start the session</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {/* Waiting for partner message */}
+                  {localStream && remoteStreams.length === 0 && (
+                    <div className="absolute top-4 right-4 z-30">
+                      <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 text-sm">
+                        <div className="flex items-center gap-2 text-yellow-700">
+                          <Users className="h-4 w-4" />
+                          <span>Waiting for partner to join...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </CardContent>
           </Card>
 

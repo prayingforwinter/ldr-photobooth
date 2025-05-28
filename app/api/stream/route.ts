@@ -1,94 +1,83 @@
-import { type NextRequest, NextResponse } from "next/server"
+// In-memory storage for rooms and streams (replace with a database in production)
+const rooms = new Map<string, Set<string>>() // roomId -> Set<userId>
+const streams = new Map<string, { userId: string; streamId: string; roomId: string; timestamp: number }>() // "roomId:userId" -> stream info
 
-// In-memory storage for demo (use Redis/database in production)
-const rooms = new Map<
-  string,
-  {
-    participants: Set<string>
-    streams: Map<string, { streamId: string; lastActivity: number }>
-    lastActivity: number
-  }
->()
-
-// Clean up old rooms every 5 minutes
-setInterval(
-  () => {
-    const now = Date.now()
-    const ROOM_TIMEOUT = 30 * 60 * 1000 // 30 minutes
-
-    for (const [roomId, room] of rooms.entries()) {
-      if (now - room.lastActivity > ROOM_TIMEOUT) {
-        rooms.delete(roomId)
-        console.log(`Cleaned up room: ${roomId}`)
-      }
-    }
-  },
-  5 * 60 * 1000,
-)
-
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const { type, roomId, userId, data } = await request.json()
 
-    console.log(`Stream API: ${type} from ${userId} in room ${roomId}`)
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, {
-        participants: new Set(),
-        streams: new Map(),
-        lastActivity: Date.now(),
-      })
-    }
-
-    const room = rooms.get(roomId)!
-    room.lastActivity = Date.now()
+    console.log(`📡 Stream API: ${type} from ${userId} in room ${roomId}`)
 
     switch (type) {
       case "join":
-        room.participants.add(userId)
-        console.log(`Room ${roomId} participants:`, Array.from(room.participants))
+        // Add user to room
+        if (!rooms.has(roomId)) {
+          rooms.set(roomId, new Set())
+        }
+        rooms.get(roomId)!.add(userId)
 
-        return NextResponse.json({
+        const participants = Array.from(rooms.get(roomId)!)
+        console.log(`👥 Room ${roomId} participants:`, participants)
+
+        return Response.json({
           success: true,
-          participants: Array.from(room.participants).filter((id) => id !== userId),
-          totalParticipants: room.participants.size,
-          streamServerUrl: process.env.ORACLE_STREAM_SERVER_URL || "ws://localhost:8080",
+          participants: participants.filter((p) => p !== userId),
+          totalParticipants: participants.length,
+          streamServerUrl: process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "ws://localhost:8080",
         })
 
       case "start-stream":
-        room.streams.set(userId, {
+        // Register stream
+        const streamKey = `${roomId}:${userId}`
+        streams.set(streamKey, {
+          userId,
           streamId: data.streamId,
-          lastActivity: Date.now(),
+          roomId,
+          timestamp: Date.now(),
         })
-        console.log(`Started stream for ${userId}: ${data.streamId}`)
-        return NextResponse.json({ success: true })
 
-      case "stop-stream":
-        room.streams.delete(userId)
-        console.log(`Stopped stream for ${userId}`)
-        return NextResponse.json({ success: true })
+        console.log(`📺 Stream registered: ${streamKey} -> ${data.streamId}`)
+
+        return Response.json({
+          success: true,
+          streamId: data.streamId,
+        })
 
       case "get-streams":
-        const activeStreams = Array.from(room.streams.entries())
-          .filter(([id]) => id !== userId)
-          .map(([id, stream]) => ({
-            userId: id,
-            streamId: stream.streamId,
-          }))
+        // Get all streams in the room
+        const roomStreams = Array.from(streams.entries())
+          .filter(([key]) => key.startsWith(`${roomId}:`))
+          .map(([key, stream]) => stream)
 
-        return NextResponse.json({ streams: activeStreams })
+        console.log(`📋 Streams in room ${roomId}:`, roomStreams)
+
+        return Response.json({
+          success: true,
+          streams: roomStreams,
+        })
 
       case "leave":
-        room.participants.delete(userId)
-        room.streams.delete(userId)
-        console.log(`${userId} left room ${roomId}`)
-        return NextResponse.json({ success: true })
+        // Remove user from room and clean up streams
+        if (rooms.has(roomId)) {
+          rooms.get(roomId)!.delete(userId)
+          if (rooms.get(roomId)!.size === 0) {
+            rooms.delete(roomId)
+          }
+        }
+
+        // Remove user's streams
+        const userStreamKey = `${roomId}:${userId}`
+        streams.delete(userStreamKey)
+
+        console.log(`👋 User ${userId} left room ${roomId}`)
+
+        return Response.json({ success: true })
 
       default:
-        return NextResponse.json({ error: "Unknown message type" }, { status: 400 })
+        return Response.json({ error: "Unknown message type" }, { status: 400 })
     }
   } catch (error) {
     console.error("Stream API error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return Response.json({ error: "Internal server error" }, { status: 500 })
   }
 }
