@@ -23,7 +23,7 @@ export async function POST(request: Request) {
           success: true,
           participants: participants.filter((p) => p !== userId),
           totalParticipants: participants.length,
-          streamServerUrl: process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "ws://localhost:8080",
+          streamServerUrl: process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "http://localhost:8080",
         })
 
       case "start-stream":
@@ -48,8 +48,9 @@ export async function POST(request: Request) {
         const roomStreams = Array.from(streams.entries())
           .filter(([key]) => key.startsWith(`${roomId}:`))
           .map(([key, stream]) => stream)
+          .filter((stream) => stream.userId !== userId) // Filter out the requester's own stream
 
-        console.log(`📋 Streams in room ${roomId}:`, roomStreams)
+        console.log(`📋 Streams in room ${roomId} for ${userId}:`, roomStreams)
 
         return Response.json({
           success: true,

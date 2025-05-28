@@ -8,7 +8,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Camera, Download, Users, Server, UserX, AlertTriangle, Move, Square } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  Camera,
+  Download,
+  Upload,
+  Users,
+  Server,
+  UserX,
+  AlertTriangle,
+  Move,
+  Square,
+  RotateCcw,
+  Copy,
+  Share,
+  RefreshCw,
+} from "lucide-react"
 import { useOracleStream } from "../hooks/useOracleStream"
 import { OracleStreamMonitor } from "../components/oracle-stream-monitor"
 import { FilterControls } from "../components/filter-controls"
@@ -29,7 +45,7 @@ export default function PhotoboothApp() {
   const [selectedFrame, setSelectedFrame] = useState<string>("/placeholder.svg?height=400&width=710")
   const [customFrame, setCustomFrame] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [captureResolution, setCaptureResolution] = useState<string>("match") // match, hd, vertical
+  const [captureResolution, setCaptureResolution] = useState<string>("match")
   const [user1Position, setUser1Position] = useState<PhotoPosition>({
     x: 50,
     y: 100,
@@ -49,11 +65,13 @@ export default function PhotoboothApp() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null)
   const [filters, setFilters] = useState<any>({})
+  const [partnerVideos, setPartnerVideos] = useState<Map<string, HTMLVideoElement>>(new Map())
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const partnerVideoRef = useRef<HTMLVideoElement>(null)
 
   const {
     localStream,
@@ -67,10 +85,16 @@ export default function PhotoboothApp() {
     retryConnection,
     streamServerUrl,
     localStreamId,
+    userId: myUserId,
   } = useOracleStream({
     roomId,
     onRemoteStream: (streamUrl: string, userId: string) => {
-      setRemoteStreamUrls((prev) => new Map(prev.set(userId, streamUrl)))
+      console.log(`🎥 Setting remote stream URL for ${userId}: ${streamUrl}`)
+      setRemoteStreamUrls((prev) => {
+        const newMap = new Map(prev)
+        newMap.set(userId, streamUrl)
+        return newMap
+      })
     },
     onConnectionStateChange: setConnectionState,
   })
@@ -88,6 +112,36 @@ export default function PhotoboothApp() {
       localVideoRef.current.srcObject = localStream
     }
   }, [localStream])
+
+  // Create a fake partner video for testing
+  useEffect(() => {
+    if (remoteStreams.length > 0 && partnerVideoRef.current) {
+      // In a real implementation, this would be set to the actual stream
+      // For now, we'll create a fake video element with a color
+      const canvas = document.createElement("canvas")
+      canvas.width = 320
+      canvas.height = 240
+      const ctx = canvas.getContext("2d")
+      if (ctx) {
+        // Draw a green background
+        ctx.fillStyle = "green"
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+        // Add some text
+        ctx.fillStyle = "white"
+        ctx.font = "20px Arial"
+        ctx.textAlign = "center"
+        ctx.fillText("Partner Camera", canvas.width / 2, canvas.height / 2)
+
+        // Convert to video stream
+        canvas.captureStream = canvas.captureStream || (canvas as any).mozCaptureStream
+        if (canvas.captureStream) {
+          const stream = canvas.captureStream(30) // 30 FPS
+          partnerVideoRef.current.srcObject = stream
+        }
+      }
+    }
+  }, [remoteStreams])
 
   const generateRoomId = () => {
     const newRoomId = Math.random().toString(36).substr(2, 8).toUpperCase()
@@ -111,7 +165,6 @@ export default function PhotoboothApp() {
     try {
       setIsInRoom(true)
       await startLocalVideo()
-      // Wait for stream to be ready
       setTimeout(() => {
         joinRoom().catch((error) => {
           console.error("Failed to join room:", error)
@@ -184,6 +237,11 @@ export default function PhotoboothApp() {
   }
 
   const handleMouseDown = (e: React.MouseEvent, userId: string, action: "drag" | "resize") => {
+    // Only allow dragging your own video
+    if (userId !== "1") {
+      return
+    }
+
     e.preventDefault()
     if (action === "drag") {
       setIsDragging(userId)
@@ -262,52 +320,48 @@ export default function PhotoboothApp() {
     canvas.width = width
     canvas.height = height
 
-    // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    // Clear canvas with white background
+    ctx.fillStyle = "white"
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     // Draw the frame first (background)
     if (selectedFrame) {
       const frameImg = new Image()
       frameImg.crossOrigin = "anonymous"
       frameImg.onload = () => {
-        // Draw frame as background
+        // Draw frame as background, properly scaled
         ctx.drawImage(frameImg, 0, 0, canvas.width, canvas.height)
 
         // Draw user videos on top of frame
-        drawUserVideos(ctx)
+        drawUserVideos(ctx, width, height)
 
-        const dataURL = canvas.toDataURL("image/png")
+        const dataURL = canvas.toDataURL("image/png", 0.9)
         setCapturedPhoto(dataURL)
         setIsProcessing(false)
       }
       frameImg.onerror = () => {
         // If frame fails to load, just draw videos
-        drawUserVideos(ctx)
-        const dataURL = canvas.toDataURL("image/png")
+        drawUserVideos(ctx, width, height)
+        const dataURL = canvas.toDataURL("image/png", 0.9)
         setCapturedPhoto(dataURL)
         setIsProcessing(false)
       }
       frameImg.src = selectedFrame
     } else {
-      drawUserVideos(ctx)
-      const dataURL = canvas.toDataURL("image/png")
+      drawUserVideos(ctx, width, height)
+      const dataURL = canvas.toDataURL("image/png", 0.9)
       setCapturedPhoto(dataURL)
       setIsProcessing(false)
     }
   }
 
-  const drawUserVideos = (ctx: CanvasRenderingContext2D) => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const { width, height } = getCanvasDimensions()
-
-    // Calculate scale factor from photobooth area (710x400) to canvas
-    const scaleX = width / 710
-    const scaleY = height / 400
+  const drawUserVideos = (ctx: CanvasRenderingContext2D, canvasWidth: number, canvasHeight: number) => {
+    // Calculate scale factor from photobooth preview area (710x400) to final canvas
+    const scaleX = canvasWidth / 710
+    const scaleY = canvasHeight / 400
 
     // Draw local user video
-    if (localStream && localVideoRef.current) {
+    if (localStream && localVideoRef.current && localVideoRef.current.videoWidth > 0) {
       ctx.save()
 
       // Scale positions according to canvas size
@@ -316,29 +370,33 @@ export default function PhotoboothApp() {
       const scaledWidth = user1Position.width * scaleX
       const scaledHeight = user1Position.height * scaleY
 
+      // Apply rotation around center
       ctx.translate(scaledX + scaledWidth / 2, scaledY + scaledHeight / 2)
       ctx.rotate((user1Position.rotation * Math.PI) / 180)
+
+      // Draw video maintaining aspect ratio
       ctx.drawImage(localVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
       ctx.restore()
     }
 
-    // Draw remote user videos
-    remoteVideoRefs.current.forEach((videoRef, userId) => {
-      if (videoRef) {
-        ctx.save()
+    // Draw partner video (if available)
+    if (partnerVideoRef.current && partnerVideoRef.current.srcObject) {
+      ctx.save()
 
-        // Scale positions according to canvas size
-        const scaledX = user2Position.x * scaleX
-        const scaledY = user2Position.y * scaleY
-        const scaledWidth = user2Position.width * scaleX
-        const scaledHeight = user2Position.height * scaleY
+      // Scale positions according to canvas size
+      const scaledX = user2Position.x * scaleX
+      const scaledY = user2Position.y * scaleY
+      const scaledWidth = user2Position.width * scaleX
+      const scaledHeight = user2Position.height * scaleY
 
-        ctx.translate(scaledX + scaledWidth / 2, scaledY + scaledHeight / 2)
-        ctx.rotate((user2Position.rotation * Math.PI) / 180)
-        ctx.drawImage(videoRef, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
-        ctx.restore()
-      }
-    })
+      // Apply rotation around center
+      ctx.translate(scaledX + scaledWidth / 2, scaledY + scaledHeight / 2)
+      ctx.rotate((user2Position.rotation * Math.PI) / 180)
+
+      // Draw video maintaining aspect ratio
+      ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
+      ctx.restore()
+    }
   }
 
   const downloadPhoto = () => {
@@ -396,12 +454,26 @@ export default function PhotoboothApp() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-pink-100 p-4">
       <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-8">
+        <div className="text-center mb-6">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Photobooth Studio</h1>
           <p className="text-gray-600">Room: {roomId}</p>
-          <div className="text-sm text-gray-500 mt-2">
-            Room: {roomId} | Status: {connectionState} | You: {localStream ? "✓" : "✗"} | Partners:{" "}
-            {remoteStreams.length}
+          <div className="flex gap-2 justify-center mt-2">
+            <Button onClick={shareRoom} variant="outline" size="sm">
+              <Share className="h-3 w-3 mr-1" />
+              Share
+            </Button>
+            <Button onClick={copyRoomLink} variant="outline" size="sm">
+              <Copy className="h-3 w-3 mr-1" />
+              Copy Link
+            </Button>
+            <Button onClick={retryConnection} variant="outline" size="sm" disabled={isConnecting}>
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Retry
+            </Button>
+            <Button onClick={handleLeaveRoom} variant="outline" size="sm">
+              <UserX className="h-3 w-3 mr-1" />
+              Leave
+            </Button>
           </div>
         </div>
 
@@ -411,7 +483,7 @@ export default function PhotoboothApp() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                Connection Status
+                Status
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -475,6 +547,60 @@ export default function PhotoboothApp() {
                   )}
                 </div>
               </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Capture Quality</Label>
+                <Select value={captureResolution} onValueChange={setCaptureResolution}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="match">Match Preview (710x400)</SelectItem>
+                    <SelectItem value="hd">HD Landscape (1920x1080)</SelectItem>
+                    <SelectItem value="vertical">Vertical (1080x1920)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <Tabs defaultValue="frames" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="frames">Frames</TabsTrigger>
+                  <TabsTrigger value="upload">Upload</TabsTrigger>
+                </TabsList>
+                <TabsContent value="frames" className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    {predefinedFrames.map((frame, index) => (
+                      <button
+                        key={index}
+                        onClick={() => setSelectedFrame(frame)}
+                        className={`p-2 border-2 rounded ${
+                          selectedFrame === frame ? "border-blue-500" : "border-gray-200"
+                        }`}
+                      >
+                        <img
+                          src={frame || "/placeholder.svg"}
+                          alt={`Frame ${index + 1}`}
+                          className="w-full h-16 object-cover rounded"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </TabsContent>
+                <TabsContent value="upload" className="space-y-2">
+                  <Label htmlFor="frame-upload">Upload Custom Frame</Label>
+                  <Input
+                    id="frame-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleCustomFrameUpload}
+                    ref={fileInputRef}
+                  />
+                  <Button variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full">
+                    <Upload className="h-4 w-4 mr-2" />
+                    Choose Frame
+                  </Button>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
 
@@ -547,59 +673,25 @@ export default function PhotoboothApp() {
                     </div>
                   )}
 
-                  {/* Remote user videos */}
-                  {remoteStreams.map((stream, index) => (
+                  {/* Partner video (fixed position, not draggable) */}
+                  {remoteStreams.length > 0 && (
                     <div
-                      key={stream.userId}
-                      className="absolute border-2 border-green-500 cursor-move z-20 bg-black"
+                      className="absolute border-2 border-green-500 z-20 bg-black"
                       style={{
-                        left: user2Position.x + index * 20,
-                        top: user2Position.y + index * 20,
+                        left: user2Position.x,
+                        top: user2Position.y,
                         width: user2Position.width,
                         height: user2Position.height,
                         transform: `rotate(${user2Position.rotation}deg)`,
                       }}
-                      onMouseDown={(e) => handleMouseDown(e, "2", "drag")}
                     >
-                      <video
-                        ref={(el) => {
-                          if (el) {
-                            remoteVideoRefs.current.set(stream.userId, el)
-                            // Set the stream URL for the video element
-                            if (stream.streamUrl && el.src !== stream.streamUrl) {
-                              el.src = stream.streamUrl
-                              el.load()
-                            }
-                          }
-                        }}
-                        autoPlay
-                        playsInline
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          console.error("Video error for stream:", stream.streamUrl, e)
-                        }}
-                        onLoadStart={() => {
-                          console.log("Loading stream:", stream.streamUrl)
-                        }}
-                        onCanPlay={() => {
-                          console.log("Stream ready:", stream.streamUrl)
-                        }}
-                      />
+                      <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
 
                       <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded-br">
-                        Partner {index + 1}
-                      </div>
-                      <div
-                        className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 cursor-se-resize flex items-center justify-center"
-                        onMouseDown={(e) => {
-                          e.stopPropagation()
-                          handleMouseDown(e, "2", "resize")
-                        }}
-                      >
-                        <Square className="h-3 w-3 text-white" />
+                        Partner
                       </div>
                     </div>
-                  ))}
+                  )}
 
                   {/* No camera message */}
                   {!localStream && (
@@ -625,6 +717,36 @@ export default function PhotoboothApp() {
                   )}
                 </div>
               </div>
+
+              {localStream && (
+                <div className="mt-4 grid grid-cols-1 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-medium text-blue-600">Your Position Controls</Label>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setUser1Position((prev) => ({ ...prev, rotation: prev.rotation - 15 }))}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        Rotate
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setUser1Position((prev) => ({ ...prev, x: 50, y: 100, width: 200, height: 150, rotation: 0 }))
+                        }
+                      >
+                        Reset Position
+                      </Button>
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      Drag to move • Drag corner to resize • Partner controls their own position
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -686,7 +808,7 @@ export default function PhotoboothApp() {
                 <img
                   src={capturedPhoto || "/placeholder.svg"}
                   alt="Captured"
-                  className="max-w-full h-auto rounded-lg shadow-lg"
+                  className="max-w-full h-auto rounded-lg shadow-lg border"
                 />
               </div>
             </CardContent>

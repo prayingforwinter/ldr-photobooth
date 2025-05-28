@@ -26,6 +26,7 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
   const hasJoinedRoom = useRef<boolean>(false)
   const streamServerUrl = useRef<string>("")
   const localStreamId = useRef<string>("")
+  const previousStreams = useRef<Set<string>>(new Set())
 
   const sendStreamMessage = async (type: string, data?: any) => {
     try {
@@ -64,11 +65,7 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
           height: { ideal: 720, min: 480 },
           facingMode: "user",
         },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: false, // No audio for now
       })
 
       console.log(`✅ [${userId.current}] Camera access granted`)
@@ -83,8 +80,8 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
   }
 
   const startStreamToServer = async () => {
-    if (!localStream || !streamServerUrl.current) {
-      console.error("No local stream or server URL available")
+    if (!localStream) {
+      console.error("No local stream available")
       return
     }
 
@@ -94,18 +91,20 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
       // Generate unique stream ID
       localStreamId.current = `stream_${userId.current}_${Date.now()}`
 
-      // Start the stream on the server
+      // In a real implementation, you would:
+      // 1. Create WebSocket connection to Oracle VM
+      // 2. Send video frames via WebSocket or WebRTC to Oracle server
+      // 3. Oracle server processes frames with filters
+      // 4. Oracle server streams processed video back
+
+      // For now, we'll simulate this
       await sendStreamMessage("start-stream", {
         streamId: localStreamId.current,
-        userId: userId.current,
       })
 
       console.log(`✅ [${userId.current}] Stream started: ${localStreamId.current}`)
       setIsConnected(true)
       onConnectionStateChange("connected")
-
-      // Start immediate polling to get other streams
-      await pollForStreams()
     } catch (error) {
       console.error(`❌ [${userId.current}] Failed to start stream:`, error)
       setError("Failed to start stream to server")
@@ -124,25 +123,43 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
       const otherStreams = streams.filter((stream: any) => stream.userId !== userId.current)
 
       // Update remote streams
-      const newStreams = otherStreams.map((stream: any) => ({
-        userId: stream.userId,
-        streamId: stream.streamId,
-        streamUrl: `${streamServerUrl.current}/stream/${stream.streamId}`,
-      }))
+      const newStreams = otherStreams.map((stream: any) => {
+        // Create a fake stream URL for testing
+        // In production, this would be a real URL from your Oracle server
+        const streamUrl = stream.streamId
+          ? `${process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "http://localhost:8080"}/stream/${stream.streamId}`
+          : null
 
-      console.log(`📺 [${userId.current}] Found ${newStreams.length} remote streams:`, newStreams)
-
-      setRemoteStreams(newStreams)
-
-      // Notify about new streams
-      newStreams.forEach((stream: StreamInfo) => {
-        console.log(`🔗 [${userId.current}] Notifying about stream: ${stream.streamUrl}`)
-        onRemoteStream(stream.streamUrl, stream.userId)
+        return {
+          userId: stream.userId,
+          streamId: stream.streamId,
+          streamUrl: streamUrl,
+        }
       })
+
+      // Check if we have new streams
+      const currentStreamIds = new Set(newStreams.map((s: StreamInfo) => s.streamId))
+      const hasNewStreams = newStreams.some((stream: StreamInfo) => !previousStreams.current.has(stream.streamId))
+
+      // Update previous streams
+      previousStreams.current = currentStreamIds
+
+      if (hasNewStreams || newStreams.length !== remoteStreams.length) {
+        console.log(`📺 [${userId.current}] Found ${newStreams.length} remote streams:`, newStreams)
+        setRemoteStreams(newStreams)
+
+        // Notify about new streams
+        newStreams.forEach((stream: StreamInfo) => {
+          if (stream.streamUrl) {
+            console.log(`🔗 [${userId.current}] Notifying about stream: ${stream.streamUrl}`)
+            onRemoteStream(stream.streamUrl, stream.userId)
+          }
+        })
+      }
     } catch (error) {
       console.error(`❌ [${userId.current}] Polling error:`, error)
     }
-  }, [onRemoteStream])
+  }, [onRemoteStream, remoteStreams.length])
 
   const joinRoom = async () => {
     if (hasJoinedRoom.current) {
@@ -169,16 +186,20 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
       console.log(`🏠 [${userId.current}] Room joined! Participants: ${totalParticipants}`)
       console.log(`👥 [${userId.current}] Other participants:`, participants)
 
-      streamServerUrl.current = serverUrl || process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "ws://localhost:8080"
+      // Use the server URL from the response or fall back to environment variable
+      streamServerUrl.current = serverUrl || process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || "http://localhost:8080"
       hasJoinedRoom.current = true
 
       // Start streaming to Oracle server
       await startStreamToServer()
 
-      // Start polling for other streams every 2 seconds
+      // Start polling for other streams
       if (pollingInterval.current) {
         clearInterval(pollingInterval.current)
       }
+
+      // Poll immediately and then every 2 seconds
+      await pollForStreams()
       pollingInterval.current = setInterval(pollForStreams, 2000)
 
       console.log(`✅ [${userId.current}] Successfully joined room and started streaming`)
@@ -218,6 +239,7 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
     setIsConnecting(false)
     setError(null)
     setRemoteStreams([])
+    previousStreams.current.clear()
     localStreamId.current = ""
   }
 
@@ -230,9 +252,13 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
     // Wait a bit before retrying
     await new Promise((resolve) => setTimeout(resolve, 1000))
 
-    if (localStream && hasJoinedRoom.current) {
+    if (localStream && !hasJoinedRoom.current) {
+      await joinRoom()
+    } else if (localStream && hasJoinedRoom.current) {
       await startStreamToServer()
     }
+
+    setIsConnecting(false)
   }, [localStream])
 
   useEffect(() => {
@@ -253,5 +279,6 @@ export function useOracleStream({ roomId, onRemoteStream, onConnectionStateChang
     retryConnection,
     streamServerUrl: streamServerUrl.current,
     localStreamId: localStreamId.current,
+    userId: userId.current,
   }
 }
