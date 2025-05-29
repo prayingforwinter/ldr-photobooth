@@ -152,25 +152,23 @@ export function useOracleStream({
 
       // Update remote streams
       const newStreams = otherStreams.map((stream: any) => {
-        // Create a secure stream URL (HTTPS/WSS) for the Oracle server
         let streamUrl: string | null = null
 
         if (stream.streamId) {
           const baseUrl = process.env.NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL || ""
 
-          // Ensure we use HTTPS/WSS
-          if (baseUrl.startsWith("http://")) {
-            streamUrl = `${baseUrl.replace("http://", "https://")}/stream/${stream.streamId}`
-          } else if (baseUrl.startsWith("https://")) {
-            streamUrl = `${baseUrl}/stream/${stream.streamId}`
-          } else if (baseUrl.startsWith("ws://")) {
-            streamUrl = `${baseUrl.replace("ws://", "wss://")}/stream/${stream.streamId}`
-          } else if (baseUrl.startsWith("wss://")) {
-            streamUrl = `${baseUrl}/stream/${stream.streamId}`
+          // Remove any trailing slashes
+          const cleanBaseUrl = baseUrl.replace(/\/$/, "")
+
+          // Create the stream URL - this should match your Oracle server's stream endpoint
+          if (cleanBaseUrl.startsWith("http://") || cleanBaseUrl.startsWith("https://")) {
+            streamUrl = `${cleanBaseUrl}/stream/${stream.streamId}`
           } else {
-            // No protocol, assume HTTPS
-            streamUrl = `https://${baseUrl}/stream/${stream.streamId}`
+            // Default to HTTPS if no protocol specified
+            streamUrl = `https://${cleanBaseUrl}/stream/${stream.streamId}`
           }
+
+          console.log(`🎥 Created stream URL for ${stream.userId}: ${streamUrl}`)
         }
 
         return {
@@ -194,8 +192,11 @@ export function useOracleStream({
         // Notify about new streams
         newStreams.forEach((stream: StreamInfo) => {
           if (stream.streamUrl) {
-            console.log(`🔗 [${userId.current}] Notifying about stream: ${stream.streamUrl}`)
+            console.log(`🔗 [${userId.current}] Notifying about stream URL: ${stream.streamUrl}`)
+            console.log(`👤 [${userId.current}] Stream belongs to user: ${stream.userId}`)
             onRemoteStream(stream.streamUrl, stream.userId)
+          } else {
+            console.warn(`⚠️ [${userId.current}] No stream URL for user ${stream.userId}`)
           }
         })
       }

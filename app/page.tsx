@@ -123,35 +123,44 @@ export default function PhotoboothApp() {
     }
   }, [localStream])
 
-  // Create a fake partner video for testing
+  // Remove this entire useEffect that creates fake green video:
+  // useEffect(() => {
+  //   if (remoteStreams.length > 0 && partnerVideoRef.current) {
+  //     // ... fake video creation code
+  //   }
+  // }, [remoteStreams])
+
+  // Replace with proper remote stream handling:
   useEffect(() => {
-    if (remoteStreams.length > 0 && partnerVideoRef.current) {
-      // In a real implementation, this would be set to the actual stream
-      // For now, we'll create a fake video element with a color
-      const canvas = document.createElement("canvas")
-      canvas.width = 320
-      canvas.height = 240
-      const ctx = canvas.getContext("2d")
-      if (ctx) {
-        // Draw a green background
-        ctx.fillStyle = "green"
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
+    console.log("🎥 Remote stream URLs updated:", remoteStreamUrls)
 
-        // Add some text
-        ctx.fillStyle = "white"
-        ctx.font = "20px Arial"
-        ctx.textAlign = "center"
-        ctx.fillText("Partner Camera", canvas.width / 2, canvas.height / 2)
+    // Handle remote video streams
+    remoteStreamUrls.forEach((streamUrl, userId) => {
+      console.log(`🔗 Setting up video for user ${userId}: ${streamUrl}`)
 
-        // Convert to video stream
-        canvas.captureStream = canvas.captureStream || (canvas as any).mozCaptureStream
-        if (canvas.captureStream) {
-          const stream = canvas.captureStream(30) // 30 FPS
-          partnerVideoRef.current.srcObject = stream
+      // For now, we'll use the partnerVideoRef for the first remote stream
+      if (partnerVideoRef.current && remoteStreamUrls.size > 0) {
+        const firstStreamUrl = Array.from(remoteStreamUrls.values())[0]
+        console.log(`📺 Setting partner video source to: ${firstStreamUrl}`)
+
+        // Create video element and set source
+        partnerVideoRef.current.src = firstStreamUrl
+        partnerVideoRef.current.load()
+
+        partnerVideoRef.current.onloadstart = () => {
+          console.log("📺 Partner video loading started")
+        }
+
+        partnerVideoRef.current.oncanplay = () => {
+          console.log("✅ Partner video can play")
+        }
+
+        partnerVideoRef.current.onerror = (e) => {
+          console.error("❌ Partner video error:", e)
         }
       }
-    }
-  }, [remoteStreams])
+    })
+  }, [remoteStreamUrls])
 
   // Update position when user moves their camera
   useEffect(() => {
@@ -398,7 +407,8 @@ export default function PhotoboothApp() {
     }
 
     // Draw partner video (using their position if available)
-    if (partnerVideoRef.current && partnerVideoRef.current.srcObject) {
+    // Replace the partner video section with better debugging:
+    if (remoteStreamUrls.size > 0) {
       ctx.save()
 
       // Use partner's actual position if available, otherwise use default
@@ -415,8 +425,8 @@ export default function PhotoboothApp() {
       ctx.rotate((partnerPosition.rotation * Math.PI) / 180)
 
       // Draw video maintaining aspect ratio
-      ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
-      ctx.restore()
+      // ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
+      // ctx.restore()
     }
   }
 
@@ -698,7 +708,7 @@ export default function PhotoboothApp() {
                   )}
 
                   {/* Partner video (shows their position, not draggable by you) */}
-                  {remoteStreams.length > 0 && (
+                  {remoteStreamUrls.size > 0 ? (
                     <div
                       className="absolute border-2 border-green-500 z-20 bg-black"
                       style={{
@@ -709,17 +719,49 @@ export default function PhotoboothApp() {
                         transform: `rotate(${displayPartnerPosition.rotation}deg)`,
                       }}
                     >
-                      <video ref={partnerVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                      <video
+                        ref={partnerVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          console.error("Partner video playback error:", e)
+                        }}
+                        onLoadStart={() => {
+                          console.log("Partner video load started")
+                        }}
+                        onCanPlay={() => {
+                          console.log("Partner video can play")
+                        }}
+                      />
 
                       <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded-br">
-                        Partner
+                        Partner ({remoteStreamUrls.size} streams)
                       </div>
                       {partnerPositions.size > 0 && (
                         <div className="absolute top-0 right-0 w-4 h-4 bg-green-600 flex items-center justify-center">
                           <Move className="h-3 w-3 text-white" />
                         </div>
                       )}
+
+                      {/* Debug info */}
+                      <div className="absolute bottom-0 left-0 bg-black/70 text-white text-xs p-1">
+                        {Array.from(remoteStreamUrls.values())[0]?.substring(0, 30)}...
+                      </div>
                     </div>
+                  ) : (
+                    // Show waiting message when no remote streams
+                    localStream && (
+                      <div className="absolute top-4 right-4 z-30">
+                        <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 text-sm">
+                          <div className="flex items-center gap-2 text-yellow-700">
+                            <Users className="h-4 w-4" />
+                            <span>Waiting for partner's video stream...</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
                   )}
 
                   {/* No camera message */}
@@ -734,7 +776,7 @@ export default function PhotoboothApp() {
                   )}
 
                   {/* Waiting for partner message */}
-                  {localStream && remoteStreams.length === 0 && (
+                  {/* {localStream && remoteStreams.length === 0 && (
                     <div className="absolute top-4 right-4 z-30">
                       <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 text-sm">
                         <div className="flex items-center gap-2 text-yellow-700">
@@ -743,7 +785,7 @@ export default function PhotoboothApp() {
                         </div>
                       </div>
                     </div>
-                  )}
+                  )} */}
                 </div>
               </div>
 
