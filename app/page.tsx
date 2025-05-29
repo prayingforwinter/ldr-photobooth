@@ -25,10 +25,8 @@ import {
   Share,
   RefreshCw,
 } from "lucide-react"
-import { useOracleStream } from "../hooks/useOracleStream"
-import { OracleStreamMonitor } from "../components/oracle-stream-monitor"
+import { useWebSocketStream } from "../hooks/useWebSocketStream"
 import { FilterControls } from "../components/filter-controls"
-import { OracleDiagnostics } from "../components/oracle-diagnostics"
 
 interface PhotoPosition {
   x: number
@@ -41,7 +39,7 @@ interface PhotoPosition {
 export default function PhotoboothApp() {
   const [roomId, setRoomId] = useState<string>("")
   const [isInRoom, setIsInRoom] = useState(false)
-  const [remoteStreamUrls, setRemoteStreamUrls] = useState<Map<string, string>>(new Map())
+  const [remoteVideoStreams, setRemoteVideoStreams] = useState<Map<string, MediaStream>>(new Map())
   const [connectionState, setConnectionState] = useState<string>("new")
   const [selectedFrame, setSelectedFrame] = useState<string>("/placeholder.svg?height=400&width=710")
   const [customFrame, setCustomFrame] = useState<string | null>(null)
@@ -69,10 +67,9 @@ export default function PhotoboothApp() {
   const [filters, setFilters] = useState<any>({})
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
-  const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
+  const partnerVideoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const partnerVideoRef = useRef<HTMLVideoElement>(null)
 
   const {
     localStream,
@@ -85,16 +82,14 @@ export default function PhotoboothApp() {
     leaveRoom,
     retryConnection,
     updatePosition,
-    streamServerUrl,
-    localStreamId,
     userId: myUserId,
-  } = useOracleStream({
+  } = useWebSocketStream({
     roomId,
-    onRemoteStream: (streamUrl: string, userId: string) => {
-      console.log(`🎥 Setting remote stream URL for ${userId}: ${streamUrl}`)
-      setRemoteStreamUrls((prev) => {
+    onRemoteStream: (stream: MediaStream, userId: string) => {
+      console.log(`🎥 Received remote stream from ${userId}`)
+      setRemoteVideoStreams((prev) => {
         const newMap = new Map(prev)
-        newMap.set(userId, streamUrl)
+        newMap.set(userId, stream)
         return newMap
       })
     },
@@ -123,44 +118,15 @@ export default function PhotoboothApp() {
     }
   }, [localStream])
 
-  // Remove this entire useEffect that creates fake green video:
-  // useEffect(() => {
-  //   if (remoteStreams.length > 0 && partnerVideoRef.current) {
-  //     // ... fake video creation code
-  //   }
-  // }, [remoteStreams])
-
-  // Replace with proper remote stream handling:
+  // Handle remote video streams
   useEffect(() => {
-    console.log("🎥 Remote stream URLs updated:", remoteStreamUrls)
-
-    // Handle remote video streams
-    remoteStreamUrls.forEach((streamUrl, userId) => {
-      console.log(`🔗 Setting up video for user ${userId}: ${streamUrl}`)
-
-      // For now, we'll use the partnerVideoRef for the first remote stream
-      if (partnerVideoRef.current && remoteStreamUrls.size > 0) {
-        const firstStreamUrl = Array.from(remoteStreamUrls.values())[0]
-        console.log(`📺 Setting partner video source to: ${firstStreamUrl}`)
-
-        // Create video element and set source
-        partnerVideoRef.current.src = firstStreamUrl
-        partnerVideoRef.current.load()
-
-        partnerVideoRef.current.onloadstart = () => {
-          console.log("📺 Partner video loading started")
-        }
-
-        partnerVideoRef.current.oncanplay = () => {
-          console.log("✅ Partner video can play")
-        }
-
-        partnerVideoRef.current.onerror = (e) => {
-          console.error("❌ Partner video error:", e)
-        }
-      }
-    })
-  }, [remoteStreamUrls])
+    if (partnerVideoRef.current && remoteVideoStreams.size > 0) {
+      // Use the first remote stream
+      const firstStream = Array.from(remoteVideoStreams.values())[0]
+      partnerVideoRef.current.srcObject = firstStream
+      console.log(`📺 Set partner video stream`)
+    }
+  }, [remoteVideoStreams])
 
   // Update position when user moves their camera
   useEffect(() => {
@@ -206,7 +172,7 @@ export default function PhotoboothApp() {
     await leaveRoom()
     setIsInRoom(false)
     setRoomId("")
-    setRemoteStreamUrls(new Map())
+    setRemoteVideoStreams(new Map())
     setPartnerPositions(new Map())
   }
 
@@ -407,8 +373,7 @@ export default function PhotoboothApp() {
     }
 
     // Draw partner video (using their position if available)
-    // Replace the partner video section with better debugging:
-    if (remoteStreamUrls.size > 0) {
+    if (remoteVideoStreams.size > 0 && partnerVideoRef.current && partnerVideoRef.current.videoWidth > 0) {
       ctx.save()
 
       // Use partner's actual position if available, otherwise use default
@@ -425,8 +390,8 @@ export default function PhotoboothApp() {
       ctx.rotate((partnerPosition.rotation * Math.PI) / 180)
 
       // Draw video maintaining aspect ratio
-      // ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
-      // ctx.restore()
+      ctx.drawImage(partnerVideoRef.current, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight)
+      ctx.restore()
     }
   }
 
@@ -489,7 +454,7 @@ export default function PhotoboothApp() {
     <div className="min-h-screen bg-gradient-to-br from-purple-100 to-pink-100 p-4">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-6">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">AI Photobooth Studio</h1>
+          <h1 className="text-4xl font-bold text-gray-800 mb-2">WebRTC Photobooth Studio</h1>
           <p className="text-gray-600">Room: {roomId}</p>
           <div className="flex gap-2 justify-center mt-2">
             <Button onClick={shareRoom} variant="outline" size="sm">
@@ -538,7 +503,7 @@ export default function PhotoboothApp() {
                 </div>
 
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <span className="font-medium">Oracle Server</span>
+                  <span className="font-medium">WebSocket</span>
                   <Badge variant={isConnected ? "default" : "secondary"}>
                     {isConnected ? (
                       <>
@@ -559,11 +524,11 @@ export default function PhotoboothApp() {
                 <div className="border-t pt-3">
                   <div className="flex items-center justify-between p-3 bg-blue-50 rounded-lg">
                     <span className="font-medium">Partner Connected</span>
-                    <Badge variant={remoteStreams.length > 0 ? "default" : "secondary"}>
-                      {remoteStreams.length > 0 ? (
+                    <Badge variant={remoteVideoStreams.size > 0 ? "default" : "secondary"}>
+                      {remoteVideoStreams.size > 0 ? (
                         <>
                           <Camera className="h-3 w-3 mr-1" />
-                          Yes ({remoteStreams.length})
+                          Yes ({remoteVideoStreams.size})
                         </>
                       ) : (
                         <>
@@ -574,9 +539,9 @@ export default function PhotoboothApp() {
                     </Badge>
                   </div>
 
-                  {remoteStreams.length > 0 && (
+                  {remoteVideoStreams.size > 0 && (
                     <div className="mt-2 text-xs text-gray-600 bg-green-50 p-2 rounded">
-                      ✅ Partner's camera is connected and streaming
+                      ✅ Partner's camera is connected via WebRTC
                     </div>
                   )}
                 </div>
@@ -645,7 +610,7 @@ export default function PhotoboothApp() {
                 <span className="flex items-center gap-2">
                   <Camera className="h-5 w-5" />
                   Photobooth Studio
-                  <Badge variant="secondary">Oracle AI Processing</Badge>
+                  <Badge variant="secondary">WebRTC Direct</Badge>
                 </span>
                 <div className="flex gap-2">
                   <Button onClick={capturePhoto} disabled={!localStream || isProcessing}>
@@ -708,7 +673,7 @@ export default function PhotoboothApp() {
                   )}
 
                   {/* Partner video (shows their position, not draggable by you) */}
-                  {remoteStreamUrls.size > 0 ? (
+                  {remoteVideoStreams.size > 0 ? (
                     <div
                       className="absolute border-2 border-green-500 z-20 bg-black"
                       style={{
@@ -719,36 +684,16 @@ export default function PhotoboothApp() {
                         transform: `rotate(${displayPartnerPosition.rotation}deg)`,
                       }}
                     >
-                      <video
-                        ref={partnerVideoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          console.error("Partner video playback error:", e)
-                        }}
-                        onLoadStart={() => {
-                          console.log("Partner video load started")
-                        }}
-                        onCanPlay={() => {
-                          console.log("Partner video can play")
-                        }}
-                      />
+                      <video ref={partnerVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
 
                       <div className="absolute top-0 left-0 bg-green-500 text-white text-xs px-2 py-1 rounded-br">
-                        Partner ({remoteStreamUrls.size} streams)
+                        Partner (WebRTC)
                       </div>
                       {partnerPositions.size > 0 && (
                         <div className="absolute top-0 right-0 w-4 h-4 bg-green-600 flex items-center justify-center">
                           <Move className="h-3 w-3 text-white" />
                         </div>
                       )}
-
-                      {/* Debug info */}
-                      <div className="absolute bottom-0 left-0 bg-black/70 text-white text-xs p-1">
-                        {Array.from(remoteStreamUrls.values())[0]?.substring(0, 30)}...
-                      </div>
                     </div>
                   ) : (
                     // Show waiting message when no remote streams
@@ -757,7 +702,7 @@ export default function PhotoboothApp() {
                         <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 text-sm">
                           <div className="flex items-center gap-2 text-yellow-700">
                             <Users className="h-4 w-4" />
-                            <span>Waiting for partner's video stream...</span>
+                            <span>Waiting for partner's WebRTC connection...</span>
                           </div>
                         </div>
                       </div>
@@ -774,18 +719,6 @@ export default function PhotoboothApp() {
                       </div>
                     </div>
                   )}
-
-                  {/* Waiting for partner message */}
-                  {/* {localStream && remoteStreams.length === 0 && (
-                    <div className="absolute top-4 right-4 z-30">
-                      <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-3 text-sm">
-                        <div className="flex items-center gap-2 text-yellow-700">
-                          <Users className="h-4 w-4" />
-                          <span>Waiting for partner to join...</span>
-                        </div>
-                      </div>
-                    </div>
-                  )} */}
                 </div>
               </div>
 
@@ -827,21 +760,12 @@ export default function PhotoboothApp() {
           </Card>
         </div>
 
-        {isInRoom && (
-          <div className="mt-6 space-y-6">
-            <OracleStreamMonitor />
-            <div className="mt-6">
-              <OracleDiagnostics />
-            </div>
-          </div>
-        )}
-
         {streamError && (
           <Card className="mt-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-red-600">
                 <AlertTriangle className="h-5 w-5" />
-                Connection Troubleshooting
+                WebSocket Connection Error
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -851,22 +775,14 @@ export default function PhotoboothApp() {
               </div>
 
               <div className="space-y-3">
-                <h4 className="font-medium">Troubleshooting Steps:</h4>
+                <h4 className="font-medium">WebSocket Troubleshooting:</h4>
                 <ol className="list-decimal list-inside space-y-2 text-sm text-gray-600">
-                  <li>Check if Oracle Cloud VM is running and accessible</li>
-                  <li>Verify stream server is running on the VM</li>
-                  <li>Check firewall settings - stream server needs ports open</li>
-                  <li>Try a different browser (Chrome/Firefox work best)</li>
-                  <li>Check the Oracle stream server monitor above</li>
-                  <li>Verify NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL is set correctly</li>
+                  <li>Check if Oracle Cloud VM is running</li>
+                  <li>Verify WebSocket server is running on the VM</li>
+                  <li>Check firewall settings for WebSocket port</li>
+                  <li>Verify NEXT_PUBLIC_ORACLE_STREAM_SERVER_URL is correct</li>
+                  <li>Try using ws:// instead of http:// in the URL</li>
                 </ol>
-              </div>
-
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-blue-700 text-sm">
-                  <strong>Oracle VM Setup:</strong> Make sure your stream processing server is running on your Oracle
-                  Cloud VM and accessible via the configured URL.
-                </p>
               </div>
             </CardContent>
           </Card>
